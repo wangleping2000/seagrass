@@ -6,7 +6,7 @@ Due to computation time and memory limits of GEE, we divide the flow of detectin
 
 #### 2. Download SAR images
 
-#### 3. Generating MLCSAR images
+#### 3. Generating MCLSAR images
 
 #### 4. Extracting intertidal seagrass meadows
 
