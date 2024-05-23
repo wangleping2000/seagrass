@@ -1,4 +1,4 @@
-## Example codes in Izembek lagoon and Tieshan Harbor
+## Example codes in some study sites
 
 Due to computation time and memory limits of GEE, we divide the flow of detecting changes of intertidal seagrass into five steps.
 
