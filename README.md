@@ -1,6 +1,6 @@
 ## Example codes in some study sites
 
-We divide the flow of mapping intertidal seagrass into five steps.
+We divide the flow of mapping intertidal seagrass into three steps.
 
 #### 1. Generating MLTC images
 
