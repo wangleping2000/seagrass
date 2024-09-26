@@ -1,13 +1,10 @@
 ## Example codes in some study sites
 
-Due to computation time and memory limits of GEE, we divide the flow of detecting changes of intertidal seagrass into five steps.
+We divide the flow of mapping intertidal seagrass into five steps.
 
 #### 1. Generating MLTC images
 
-#### 2. Download SAR images
+#### 2. Generating MCLSAR images
 
-#### 3. Generating MCLSAR images
+#### 3. Extracting intertidal seagrass meadows
 
-#### 4. Extracting intertidal seagrass meadows
-
-#### 5. Change detection
