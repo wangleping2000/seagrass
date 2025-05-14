@@ -1,0 +1,415 @@
+var geometry = 
+    /* color: #d63000 */
+    /* shown: false */
+    /* displayProperties: [
+      {
+        "type": "rectangle"
+      }
+    ] */
+    ee.Geometry.Polygon(
+        [[[8.572970318768016, 54.6715069834952],
+          [8.572970318768016, 54.47807602193646],
+          [8.917666363689891, 54.47807602193646],
+          [8.917666363689891, 54.6715069834952]]], null, false),
+    flat = /* color: #98ff00 */ee.Geometry.MultiPoint(
+        [[8.667755091133564, 54.5774533983263],
+         [8.74500271076247, 54.65200654271273],
+         [8.658828699532002, 54.56053569398621],
+         [8.822250330391377, 54.63551721506292],
+         [8.815727198067158, 54.50655118413946],
+         [8.87958523029372, 54.59138035408411],
+         [8.662261927071064, 54.58760065110426],
+         [8.643722498360127, 54.580836096714776],
+         [8.831520044746846, 54.554363960361655],
+         [8.70208736652419, 54.559938470261315],
+         [8.831531703787538, 54.58853245017694],
+         [8.811618984060976, 54.58534934318256],
+         [8.856250942068788, 54.59012391040621],
+         [8.826725185232851, 54.61716922220453],
+         [8.827068507986757, 54.62651158685324],
+         [8.809559047537538, 54.58097216494628],
+         [8.851444423514101, 54.58574724515867],
+         [8.768886258471138, 54.613156589439605],
+         [8.865016629564888, 54.54390974517295],
+         [8.788112332689888, 54.50525552061656],
+         [8.858150174486763, 54.5709857380514],
+         [8.792918851244576, 54.64574937699468],
+         [8.682368924486763, 54.66441883560115],
+         [8.613998393688593, 54.651210084231224],
+         [8.810379008922968, 54.64564805805393]]),
+    water = /* color: #0b4a8b */ee.Geometry.MultiPoint(
+        [[8.74774929279372, 54.53611385870436],
+         [8.74053951496169, 54.53053609250846],
+         [8.736076319160908, 54.52455906861182],
+         [8.72028347248122, 54.50821740503579],
+         [8.703460657539814, 54.49166979383264],
+         [8.592025737438593, 54.59873787385354],
+         [8.58035276380578, 54.59834009876674],
+         [8.59957883802453, 54.6218021811411],
+         [8.785659770641718, 54.568893958330406],
+         [8.685409526501093, 54.48242238476832],
+         [8.758193950329218, 54.52986495686567]]),
+    imageCollection = ee.ImageCollection("COPERNICUS/S1_GRD");
+
+var dataset = ee.ImageCollection("UQ/murray/Intertidal/v1_1/global_intertidal");
+var img_num = dataset.size();
+print('tidal flats',dataset)
+
+var tidalflats = ee.Image(dataset.toList(img_num).get(10));
+var visualization = {
+  bands: ['classification'],
+  min: 0,
+  max: 1,
+  palette: ['0000ff']
+};
+Map.addLayer(tidalflats, visualization, 'Intertidal areas');
+
+////////////////////////////////// MTLC ///////////////////////////////////
+
+Map.centerObject(geometry,12);
+var startDate = '2023-01-01';
+var endDate = '2024-01-01';
+var s2_cloudmask = require('users/wanglp2000/export:s2cloudmask');
+var s2_all_cloudmask = s2_cloudmask.s2cloudmask(startDate,endDate,geometry,50)
+                         .map(function(image){return image.clip(geometry)});
+                         
+print(s2_all_cloudmask)
+var num_img = s2_all_cloudmask.size();
+var prj = s2_all_cloudmask.first().select('B1').projection()
+var crs = prj.getInfo()['crs']
+print(crs);
+
+// solve the problems of one site has different tiles in one day
+function mosaicByDate(imcol){
+  // convert the ImageCollection into List
+  var imlist = imcol.toList(imcol.size());
+  
+  // Obtain the distinct image dates from the ImageCollection
+  var unique_dates = imlist.map(function(im){
+    return ee.Image(im).date().format("YYYY-MM-dd");
+  }).distinct();
+  
+  // mosaic the images acquired on the same date
+  var mosaic_imlist = unique_dates.map(function(d){
+    d = ee.Date(d);
+    var im = imcol.filterDate(d, d.advance(1, "day")).mosaic();
+    // return the mosaiced same-date images and set the time properties
+    return im.set(
+      "system:time_start", d.millis(), 
+      "system:id", d.format("YYYY-MM-dd")
+      );
+  });
+  return ee.ImageCollection(mosaic_imlist);
+} 
+
+var s2_all_cloudmask_collection = mosaicByDate(s2_all_cloudmask);
+//print(s2_all_cloudmask_collection);
+
+// single image 
+
+// All the images have area
+function imagearea(image){
+  var constant = image.select('B1').divide(image.select('B1')).unmask();
+  var image1 = constant.toInt16().clip(geometry);
+  var image_vector = image1.reduceToVectors({'scale':60,'maxPixels': 1e13});
+  image1 = ee.Image.pixelArea().divide(1e6);
+  var area_image = image1.reduceRegion({
+          reducer:ee.Reducer.sum(),
+          geometry:image_vector,
+          crs:image1.projection(),
+          scale:60,
+          maxPixels:1e13
+  });
+  var image_area = ee.Number(area_image.get('area'));
+  return image.set('imagearea',image_area);
+}  
+
+var s2_all_cloudmask_collection_lesscloud = s2_all_cloudmask_collection.map(imagearea)
+
+function cloudarea(image){
+  // To get the cloud of all the images, 0 is cloud
+  var image_cloud = (image.select('B1').unmask()).updateMask((image.select('B1').unmask()).eq(0)).toInt16().clip(geometry);
+  // get vectors of cloud
+  var vector = image_cloud.reduceToVectors({'scale':100,'maxPixels': 1e13,'tileScale': 16});
+  image_cloud = ee.Image.pixelArea().divide(1e6);
+  // calculate area
+  var area_cloud = image_cloud.reduceRegion({
+          reducer:ee.Reducer.sum(),
+          geometry:vector,
+          crs:image_cloud.projection(),
+          scale:100,
+          maxPixels:1e13
+  });
+  var area = (image.get('imagearea'));
+  var cloud_cover = area_cloud.get('area');
+  // get the proportion of cloud
+  var cloudproportion = ee.Number(cloud_cover).divide(ee.Number(area));
+  return image.set('cloudarea',cloud_cover)
+              .set('cloudproportion',cloudproportion);
+}
+ 
+var band = ['B1','B2','B3','B4','B5','B6','B7','B8','B8A','B9','B11','B12','NDVI','NDWI'];
+
+// cloudmask
+s2_all_cloudmask_collection_lesscloud = s2_all_cloudmask_collection_lesscloud.map(cloudarea).filter(ee.Filter.lt('cloudproportion',0.25))
+.map(function(image){return image.reproject({'crs':crs,'scale':10})}).map(NDVI).map(NDWI);
+
+var img_num = s2_all_cloudmask_collection_lesscloud.size();
+print('img_num',img_num);
+
+var green_images = s2_all_cloudmask_collection_lesscloud
+                  .map(function(img){return addNDVI(img,flat)})
+                  .sort('MeanNDVI',false);
+print('green_images',green_images)                  
+print(green_images.aggregate_array('MeanNDVI'))
+
+
+var MLTC = green_images.limit(img_num.divide(10).round()).median().reproject({'crs':crs,'scale':10}); // 10%~20%
+Map.addLayer(MLTC,{bands:['B8','B4','B3'],max:0.3,min:0},'MLTC');
+
+
+
+////////////////////////////////// MLCSAR ///////////////////////////////////
+imageCollection = imageCollection.filterBounds(geometry)
+                  .filterDate(startDate,endDate);
+print(imageCollection)
+
+var prj = imageCollection.first().select('VV').projection()
+var crs = prj.getInfo()['crs']
+print(crs);
+
+var whole_image = ee.Image(1).clip(geometry);
+Map.addLayer(whole_image,{max:2,min:0},'whole_image')
+
+
+
+var area = area_sum(whole_image).get('image_area');
+print(area)
+
+                    
+var thre = ee.Number(area).multiply(ee.Number(0.8));
+
+var s1_preprocces_view = imageCollection.map(function(image){return image.clip(geometry)})
+                    .map(area_sum).filter(ee.Filter.gt('image_area',thre))
+print('s1_preprocces_view',s1_preprocces_view)
+
+var S1_images = s1_preprocces_view.map(addVV_flat).map(addVV_water).map(add_DFW_VV)
+                .map(addVH_flat).map(addVH_water).map(add_DFW_VH).sort('flat_water_diff_VV',false);
+
+var img_num = S1_images.size();
+
+                
+print(S1_images.sort('flat_water_diff_VV',false).aggregate_array('flat_water_diff_VV')) // 
+var MLCSAR = S1_images.sort('flat_water_diff_VV',false).limit(S1_images.size().divide(3).round()).median().reproject({'crs':crs,'scale':10});
+var image_VV = MLCSAR.select('VV');
+var image_VH = MLCSAR.select('VH')
+Map.addLayer(image_VV,{bands:['VV'],max:-10,min:-30},'image_VV');
+Map.addLayer(image_VH,{bands:['VH'],max:-10,min:-30},'image_VH');
+
+var threshold3 = otsu(image_VH.select('VH'));
+var remove_water3 = MLTC.updateMask(image_VH.select('VH').lt(threshold3));
+Map.addLayer(remove_water3,{bands:['B8','B4','B3'],max:0.3,min:0},'remove_water3');
+
+var intersection_water = remove_water3.select('B3').divide(remove_water3.select('B3'));
+                       
+Map.addLayer(intersection_water,{max:2,min:1},'intersection_water');
+
+var vectors = intersection_water.int16().reduceToVectors({
+  geometry: geometry,
+  crs: crs,
+  scale: 20,
+  geometryType: 'polygon',
+  eightConnected: false,
+  labelProperty: 'tide',
+  tileScale: 16,
+  maxPixels: 1e13
+});
+
+var max_water = vectors.filterBounds(flat);
+var max_water_buffer = max_water.geometry().buffer({'distance':-20,'maxError':1})
+Map.addLayer(max_water_buffer,{'color':'#ffa308'},'max_water_buffer');
+
+var band = ['B1','B2','B3','B4','B5','B6','B7','B8','B8A','B9','B11','B12','NDVI','NDWI'];
+
+//////////////////////////////// Extracting intertidal seagrass ///////////////////////////////////
+var palettes = require('users/gena/packages:palettes');
+var palette = palettes.misc.tol_rainbow[7];
+
+MLTC = remove_water(MLTC);
+var image_ndvi = MLTC.clip(max_water_buffer);
+var threshold = otsu(image_ndvi.select(['NDVI']));
+// print('threshold',threshold);
+var sg = image_ndvi.select('NDVI').updateMask(image_ndvi.select('NDVI').gt(threshold));
+Map.addLayer(sg,{palette:palette},'sg');
+
+var seagrass = sg.select('NDVI').divide(sg.select('NDVI')).toInt16();
+Map.addLayer(seagrass,{max:1,min:1,palette: ['#0cff31']},'seagrass');
+
+var seagrass_shp = seagrass.reduceToVectors({
+  geometry: geometry,
+  crs: crs,
+  scale: 10,
+  geometryType: 'polygon',
+  eightConnected: false,
+  labelProperty: 'tide',
+  tileScale: 16,
+  maxPixels: 1e13
+});
+
+Map.addLayer(seagrass_shp,{},'seagrass_shp');
+
+//{
+
+  
+/// otsu ///
+function otsu1(histogram) {
+    
+    var counts = ee.Array(ee.Dictionary(histogram).get('histogram'))
+    
+    var means = ee.Array(ee.Dictionary(histogram).get('bucketMeans'))
+    
+    var size = means.length().get([0])
+    
+    var total = counts.reduce(ee.Reducer.sum(), [0]).get([0])
+    
+    var sum = means.multiply(counts).reduce(ee.Reducer.sum(), [0]).get([0])
+    
+    var mean = sum.divide(total)
+
+    
+    var indices = ee.List.sequence(1, size)
+    
+    var bss = indices.map(function (i) {
+        
+        var aCounts = counts.slice(0, 0, i)
+        var aCount = aCounts.reduce(ee.Reducer.sum(), [0]).get([0])
+        var aMeans = means.slice(0, 0, i)
+        
+        var aMean = aMeans.multiply(aCounts)
+            .reduce(ee.Reducer.sum(), [0]).get([0])
+            .divide(aCount)
+
+        var bCount = total.subtract(aCount)
+        
+        var bMean = sum.subtract(aCount.multiply(aMean)).divide(bCount)
+        
+        return aCount.multiply(aMean.subtract(mean).pow(2)).add(
+            bCount.multiply(bMean.subtract(mean).pow(2)))
+    })
+
+
+    return means
+        .sort(bss)
+        .get([-1])
+}
+
+
+function otsu(image) {
+    var histogram = image.reduceRegion({
+        reducer: ee.Reducer.histogram(1000, 0.01)
+            .combine('mean', null, true)
+            .combine('variance', null, true),
+        geometry: geometry,
+        scale: 30,
+        bestEffort: true,
+        tileScale:16
+    });
+    
+    return otsu1(histogram.get(histogram.keys().get(0)));
+}  
+
+// }
+
+function remove_water(img){
+  var image_ndwi = img.select(['NDWI']);
+  img = img.updateMask(image_ndwi.lt(0));
+  return img;
+}
+
+/////////----------------------------------------/////////
+
+function addVV_flat(img){ // Calculating median VV of tidal flat samples
+  var img2 = img.select("VV")
+  var value = img2.reduceRegion({'reducer':ee.Reducer.median(), 'geometry':flat, 'maxPixels':1e16, 'scale':20,'tileScale':16})
+  return img.set('MeanVV_flat', ee.Number(value.get("VV")))
+}
+
+function addVH_flat(img){ // Calculating median VH of tidal flat samples
+  var img2 = img.select("VH")
+  var value = img2.reduceRegion({'reducer':ee.Reducer.median(), 'geometry':flat, 'maxPixels':1e16, 'scale':20, 'tileScale':16})
+  return img.set('MeanVH_flat', ee.Number(value.get("VH")))
+}
+
+function addVV_water(img){ // Calculating median VV of water samples
+  var img2 = img.select("VV")
+  var value = img2.reduceRegion({'reducer':ee.Reducer.median(), 'geometry':water, 'maxPixels':1e16, 'scale':20,'tileScale':16})
+  return img.set('MeanVV_water', ee.Number(value.get("VV")))
+}
+
+function addVH_water(img){ // Calculating median VH of water samples
+  var img2 = img.select("VH")
+  var value = img2.reduceRegion({'reducer':ee.Reducer.median(), 'geometry':water, 'maxPixels':1e16, 'scale':20,'tileScale':16})
+  return img.set('MeanVH_water', ee.Number(value.get("VH")))
+}
+
+function add_DFW_VV(image){
+  var water_VV = image.get('MeanVV_water');
+  var flat_VV = image.get('MeanVV_flat');
+  var flat_water_VV = ee.Number(flat_VV).subtract(ee.Number(water_VV)).abs();
+  return image.set('flat_water_diff_VV',flat_water_VV);
+}
+
+function add_DFW_VH(image){
+  var water_VH = image.get('MeanVH_water');
+  var flat_VH = image.get('MeanVH_flat');
+  var flat_water_VH = ee.Number(flat_VH).subtract(ee.Number(water_VH)).abs();
+  return image.set('flat_water_diff_VH',flat_water_VH);
+}
+
+function NDVI(image) {
+  return image.addBands(
+    image.normalizedDifference(["B8", "B4"])
+        .rename("NDVI"));
+}
+
+function addNDVI(img,sample){ // Calculating mean NDVI of tidal flat samples
+  var img2 = img.select("NDVI");
+  var value = img2.reduceRegion({reducer:ee.Reducer.mean(),geometry:sample,maxPixels:1e16})
+  return img.set('MeanNDVI', ee.Number(value.get("NDVI")));
+}
+
+
+function NDWI(image) {    
+  return image.addBands(
+    image.normalizedDifference(["B3", "B8"])
+        .rename("NDWI"));
+}
+
+function addNDWI(img,sample){ // Calculating mean NDWI of tidal flat samples
+  var img2 = img.select("NDWI");
+  var value = img2.reduceRegion({reducer:ee.Reducer.mean(),geometry:sample,maxPixels:1e16})
+  return img.set('MeanNDWI', ee.Number(value.get("NDWI")));
+}
+
+function MNDWI(image) {    
+  return image.addBands(
+    image.normalizedDifference(["B3", "B11"])
+        .rename("MNDWI"));
+}
+
+function area_sum(image){
+  var band = ee.String(image.bandNames().get(0));
+  var area = image.select(band).divide(image.select(band)).reduceRegion({
+      reducer:ee.Reducer.sum(),
+      geometry:geometry,
+      crs:crs,
+      scale:500,
+      maxPixels:1e16
+  });
+  var image_area = ee.Number(area.values().get(0));
+  return image.set('image_area',image_area);
+}
+
+
+
+// }
