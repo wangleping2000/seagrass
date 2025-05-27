@@ -1,5 +1,5 @@
 ## A Rule-Based Automatic Approach for Mapping Intertidal Seagrass Meadows Using Optical and Synthetic Aperture Radar Images
-Reference: Wang L, Zhang Z, Li Z, Li Y, Zhang Q, Jiang Y. A Rule-Based Automatic Approach for Mapping Intertidal Seagrass Meadows Using Optical and Synthetic Aperture Radar Images. J. Remote Sens. 2025;5:Article 0506. https://doi. org/10.34133/remotesensing.0506
+Reference: Wang L, Zhang Z, Li Z, Li Y, Zhang Q, Jiang Y. A Rule-Based Automatic Approach for Mapping Intertidal Seagrass Meadows Using Optical and Synthetic Aperture Radar Images. J. Remote Sens. 2025;5:Article 0506. https://doi.org/10.34133/remotesensing.0506
 
 ### 1. Difference of backscatter coefficient betweens intertidal seagrass and salt marshes or mangroves.
 ![image](https://github.com/user-attachments/assets/71607350-0cdb-4692-91fc-4de227f27bb4)
